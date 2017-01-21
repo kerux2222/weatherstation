@@ -16,11 +16,6 @@
 
 package com.example.androidthings.weatherstation;
 
-import com.xively.*;
-import com.xively.auth.XiAuthentication;
-import com.xively.auth.XiAuthenticationCallback;
-import com.xively.auth.XiAuthenticationFactory;
-
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
@@ -45,8 +40,7 @@ import com.google.android.things.contrib.driver.ht16k33.AlphanumericDisplay;
 import com.google.android.things.contrib.driver.pwmspeaker.Speaker;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.PeripheralManagerService;
-import com.xively.messaging.XiMessaging;
-import com.xively.messaging.XiMessagingCreator;
+
 
 import java.io.IOException;
 
@@ -54,13 +48,10 @@ public class WeatherStationActivity extends Activity {
 
     private static final String TAG = WeatherStationActivity.class.getSimpleName();
 
-    private String USERNAME = "alan.c.inacio@gmail.com";
-    private String PASSWORD = "Braven6624";
-    private String ACCOUNT_ID = "830c9d7c-6f4f-4c6d-8a9f-924060067a03";
-    private String CHANNEL = "xi/blue/v1/830c9d7c-6f4f-4c6d-8a9f-924060067a03/d/36a5da44-20c9-4826-b967-2b8ae8abcb32/hatStats";
-
-    private XiSession mXiSession;
-    private XiMessaging mXiMessaging;
+    private String USERNAME = BuildConfig.USERNAME;
+    private String PASSWORD = BuildConfig.PASSWORD;
+    private String ACCOUNT_ID = BuildConfig.ACCOUNT_ID;
+    private String DEVICE_ID = BuildConfig.DEVICE_ID;
 
     private enum DisplayMode {
         TEMPERATURE,
@@ -90,7 +81,7 @@ public class WeatherStationActivity extends Activity {
     private float mLastTemperature;
     private float mLastPressure;
 
-    private PubsubPublisher mPubsubPublisher;
+    private XivelyPublisher mXivelyPublisher;
     private ImageView mImageView;
 
     // Callback used when we register the BMP280 sensor driver with the system's SensorManager.
@@ -102,16 +93,16 @@ public class WeatherStationActivity extends Activity {
                 // Our sensor is connected. Start receiving temperature data.
                 mSensorManager.registerListener(mTemperatureListener, sensor,
                         SensorManager.SENSOR_DELAY_NORMAL);
-                if (mPubsubPublisher != null) {
-                    mSensorManager.registerListener(mPubsubPublisher.getTemperatureListener(), sensor,
+                if (mXivelyPublisher != null) {
+                    mSensorManager.registerListener(mXivelyPublisher.getTemperatureListener(), sensor,
                             SensorManager.SENSOR_DELAY_NORMAL);
                 }
             } else if (sensor.getType() == Sensor.TYPE_PRESSURE) {
                 // Our sensor is connected. Start receiving pressure data.
                 mSensorManager.registerListener(mPressureListener, sensor,
                         SensorManager.SENSOR_DELAY_NORMAL);
-                if (mPubsubPublisher != null) {
-                    mSensorManager.registerListener(mPubsubPublisher.getPressureListener(), sensor,
+                if (mXivelyPublisher != null) {
+                    mSensorManager.registerListener(mXivelyPublisher.getPressureListener(), sensor,
                             SensorManager.SENSOR_DELAY_NORMAL);
                 }
             }
@@ -268,67 +259,14 @@ public class WeatherStationActivity extends Activity {
             throw new RuntimeException("Error initializing speaker", e);
         }
 
-        //Start Xively
-        XiAuthentication xiAuthentication =
-                XiAuthenticationFactory.createAuthenticationService(this);
-
-        xiAuthentication.requestAuth(USERNAME, PASSWORD,
-                ACCOUNT_ID, new XiAuthenticationCallback() {
-                    @Override
-                    public void sessionCreated(XiSession xiSession) {
-                        Log.d(TAG, "Xively Authenticated");
-                        mXiSession = xiSession;
-
-                        final XiMessagingCreator  xiMessagingCreator= mXiSession.requestMessaging();
-
-                        xiMessagingCreator.addServiceCreatorCallback(new XiServiceCreatorCallback<XiMessaging>() {
-                            @Override
-                            public void onServiceCreated(XiMessaging xiMessaging) {
-                                xiMessagingCreator.removeAllCallbacks();
-                                mXiMessaging = xiMessaging;
-                                Log.d(TAG, "messaging Service Created");
-
-                                //create a simple string message
-                                byte[] byteArrayMessage = "Hello Xively World!".getBytes();
-                                try {
-                                    mXiMessaging.publish(CHANNEL, byteArrayMessage, XiMessaging.XiMessagingQoS.AtLeastOnce);
-                                } catch (XiException.NotConnectedException e){
-                                    Log.d(TAG, "not connectted exception", e);
-                                }
-                            }
-
-                            @Override
-                            public void onServiceCreateFailed() {
-                                xiMessagingCreator.removeAllCallbacks();
-                                Log.d(TAG, "failed to create messaging service");
-                            }
-                        });
-
-                        xiMessagingCreator.createMessaging();
-                    }
-
-                    @Override
-                    public void authenticationFailed(XiAuthenticationCallback.XiAuthenticationError
-                                                             xiAuthenticationError) {
-                        Log.d(TAG, "Xively Authentication Failed");
-
-                    }
-                });
-
-
-
-
-        // start Cloud PubSub Publisher if cloud credentials are present.
-        int credentialId = getResources().getIdentifier("credentials", "raw", getPackageName());
-        if (credentialId != 0) {
-            try {
-                mPubsubPublisher = new PubsubPublisher(this, "weatherstation",
-                        BuildConfig.PROJECT_ID, BuildConfig.PUBSUB_TOPIC, credentialId);
-                mPubsubPublisher.start();
-            } catch (IOException e) {
-                Log.e(TAG, "error creating pubsub publisher", e);
-            }
+        try {
+            mXivelyPublisher = new XivelyPublisher(this, ACCOUNT_ID, USERNAME, PASSWORD, DEVICE_ID);
+        } catch (IOException e) {
+            Log.e(TAG, "error creating xivelyPublisher", e);
         }
+
+        mXivelyPublisher.start();
+
     }
 
     @Override
@@ -425,11 +363,11 @@ public class WeatherStationActivity extends Activity {
         }
 
         // clean up Cloud PubSub publisher.
-        if (mPubsubPublisher != null) {
-            mSensorManager.unregisterListener(mPubsubPublisher.getTemperatureListener());
-            mSensorManager.unregisterListener(mPubsubPublisher.getPressureListener());
-            mPubsubPublisher.close();
-            mPubsubPublisher = null;
+        if (mXivelyPublisher != null) {
+            mSensorManager.unregisterListener(mXivelyPublisher.getTemperatureListener());
+            mSensorManager.unregisterListener(mXivelyPublisher.getPressureListener());
+            mXivelyPublisher.close();
+            mXivelyPublisher = null;
         }
     }
 
