@@ -16,6 +16,11 @@
 
 package com.example.androidthings.weatherstation;
 
+import com.xively.*;
+import com.xively.auth.XiAuthentication;
+import com.xively.auth.XiAuthenticationCallback;
+import com.xively.auth.XiAuthenticationFactory;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
@@ -40,12 +45,22 @@ import com.google.android.things.contrib.driver.ht16k33.AlphanumericDisplay;
 import com.google.android.things.contrib.driver.pwmspeaker.Speaker;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.PeripheralManagerService;
+import com.xively.messaging.XiMessaging;
+import com.xively.messaging.XiMessagingCreator;
 
 import java.io.IOException;
 
 public class WeatherStationActivity extends Activity {
 
     private static final String TAG = WeatherStationActivity.class.getSimpleName();
+
+    private String USERNAME = "alan.c.inacio@gmail.com";
+    private String PASSWORD = "Braven6624";
+    private String ACCOUNT_ID = "830c9d7c-6f4f-4c6d-8a9f-924060067a03";
+    private String CHANNEL = "xi/blue/v1/830c9d7c-6f4f-4c6d-8a9f-924060067a03/d/36a5da44-20c9-4826-b967-2b8ae8abcb32/hatStats";
+
+    private XiSession mXiSession;
+    private XiMessaging mXiMessaging;
 
     private enum DisplayMode {
         TEMPERATURE,
@@ -252,6 +267,56 @@ public class WeatherStationActivity extends Activity {
         } catch (IOException e) {
             throw new RuntimeException("Error initializing speaker", e);
         }
+
+        //Start Xively
+        XiAuthentication xiAuthentication =
+                XiAuthenticationFactory.createAuthenticationService(this);
+
+        xiAuthentication.requestAuth(USERNAME, PASSWORD,
+                ACCOUNT_ID, new XiAuthenticationCallback() {
+                    @Override
+                    public void sessionCreated(XiSession xiSession) {
+                        Log.d(TAG, "Xively Authenticated");
+                        mXiSession = xiSession;
+
+                        final XiMessagingCreator  xiMessagingCreator= mXiSession.requestMessaging();
+
+                        xiMessagingCreator.addServiceCreatorCallback(new XiServiceCreatorCallback<XiMessaging>() {
+                            @Override
+                            public void onServiceCreated(XiMessaging xiMessaging) {
+                                xiMessagingCreator.removeAllCallbacks();
+                                mXiMessaging = xiMessaging;
+                                Log.d(TAG, "messaging Service Created");
+
+                                //create a simple string message
+                                byte[] byteArrayMessage = "Hello Xively World!".getBytes();
+                                try {
+                                    mXiMessaging.publish(CHANNEL, byteArrayMessage, XiMessaging.XiMessagingQoS.AtLeastOnce);
+                                } catch (XiException.NotConnectedException e){
+                                    Log.d(TAG, "not connectted exception", e);
+                                }
+                            }
+
+                            @Override
+                            public void onServiceCreateFailed() {
+                                xiMessagingCreator.removeAllCallbacks();
+                                Log.d(TAG, "failed to create messaging service");
+                            }
+                        });
+
+                        xiMessagingCreator.createMessaging();
+                    }
+
+                    @Override
+                    public void authenticationFailed(XiAuthenticationCallback.XiAuthenticationError
+                                                             xiAuthenticationError) {
+                        Log.d(TAG, "Xively Authentication Failed");
+
+                    }
+                });
+
+
+
 
         // start Cloud PubSub Publisher if cloud credentials are present.
         int credentialId = getResources().getIdentifier("credentials", "raw", getPackageName());
